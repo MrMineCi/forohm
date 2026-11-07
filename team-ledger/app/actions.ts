@@ -41,10 +41,12 @@ export async function addTransaction(
   const amount = Number(formData.get('amount'))
   const playedOn = String(formData.get('played_on') ?? '')
   const note = String(formData.get('note') ?? '').trim()
+  const photoPath = String(formData.get('photo_path') ?? '')
 
   if (kind !== 'win' && kind !== 'loss') return { error: 'เลือกว่าได้หรือเสีย' }
   if (!Number.isFinite(amount) || amount <= 0) return { error: 'ใส่จำนวนเงินมากกว่า 0' }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(playedOn)) return { error: 'เลือกวันที่' }
+  if (photoPath && !photoPath.startsWith(`${teamId}/`)) return { error: 'รูปไม่ถูกต้อง' }
 
   const supabase = await createClient()
   const { error } = await supabase.from('transactions').insert({
@@ -53,6 +55,7 @@ export async function addTransaction(
     amount,
     played_on: playedOn,
     note: note || null,
+    photo_path: photoPath || null,
   })
   if (error) return { error: error.message }
 
@@ -63,7 +66,19 @@ export async function addTransaction(
 
 export async function deleteTransaction(teamId: string, id: string) {
   const supabase = await createClient()
-  await supabase.from('transactions').delete().eq('id', id)
+
+  const { data: tx } = await supabase
+    .from('transactions')
+    .select('photo_path')
+    .eq('id', id)
+    .maybeSingle()
+
+  const { data: deleted } = await supabase.from('transactions').delete().eq('id', id).select('id')
+
+  if (deleted?.length && tx?.photo_path) {
+    await supabase.storage.from('slips').remove([tx.photo_path])
+  }
+
   revalidatePath(`/teams/${teamId}`)
   revalidatePath('/')
 }

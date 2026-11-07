@@ -12,6 +12,7 @@ type Tx = {
   amount: number
   note: string | null
   played_on: string
+  photo_path: string | null
   profiles: { display_name: string } | null
 }
 
@@ -32,12 +33,21 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
 
   const { data: rows } = await supabase
     .from('transactions')
-    .select('id, user_id, kind, amount, note, played_on, profiles(display_name)')
+    .select('id, user_id, kind, amount, note, played_on, photo_path, profiles(display_name)')
     .eq('team_id', id)
     .order('played_on', { ascending: false })
     .order('created_at', { ascending: false })
 
   const txs = (rows ?? []) as unknown as Tx[]
+
+  const photoUrls = new Map<string, string>()
+  const paths = txs.map((t) => t.photo_path).filter((p): p is string => !!p)
+  if (paths.length) {
+    const { data: signed } = await supabase.storage.from('slips').createSignedUrls(paths, 3600)
+    for (const s of signed ?? []) {
+      if (s.path && s.signedUrl) photoUrls.set(s.path, s.signedUrl)
+    }
+  }
 
   let wins = 0
   let losses = 0
@@ -90,23 +100,31 @@ export default async function TeamPage({ params }: { params: Promise<{ id: strin
                   </span>
                 </div>
                 <ul>
-                  {day.items.map((t) => (
-                    <li key={t.id}>
-                      <span className={`pill ${t.kind}`}>{t.kind === 'win' ? 'ได้' : 'เสีย'}</span>
-                      <span className="grow">
-                        <span className="num">฿{baht(Number(t.amount))}</span>
-                        <span className="muted small">
-                          {' '}โดย {t.profiles?.display_name ?? 'ไม่ทราบชื่อ'}
-                          {t.note ? ` · ${t.note}` : ''}
+                  {day.items.map((t) => {
+                    const url = t.photo_path ? photoUrls.get(t.photo_path) : undefined
+                    return (
+                      <li key={t.id}>
+                        <span className={`pill ${t.kind}`}>{t.kind === 'win' ? 'ได้' : 'เสีย'}</span>
+                        <span className="grow">
+                          <span className="num">฿{baht(Number(t.amount))}</span>
+                          <span className="muted small">
+                            {' '}โดย {t.profiles?.display_name ?? 'ไม่ทราบชื่อ'}
+                            {t.note ? ` · ${t.note}` : ''}
+                          </span>
                         </span>
-                      </span>
-                      {t.user_id === user?.id && (
-                        <form action={deleteTransaction.bind(null, team.id, t.id)}>
-                          <button className="linklike small" aria-label="ลบรายการนี้">ลบ</button>
-                        </form>
-                      )}
-                    </li>
-                  ))}
+                        {url && (
+                          <a href={url} target="_blank" rel="noreferrer" aria-label="ดูรูปขนาดเต็ม">
+                            <img src={url} alt="รูปประกอบรายการ" className="thumb" loading="lazy" />
+                          </a>
+                        )}
+                        {t.user_id === user?.id && (
+                          <form action={deleteTransaction.bind(null, team.id, t.id)}>
+                            <button className="linklike small" aria-label="ลบรายการนี้">ลบ</button>
+                          </form>
+                        )}
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             ))
